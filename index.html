@@ -306,13 +306,55 @@ function enterChat(id) {
   document.getElementById('meLabel').textContent = 'Conectado como ' + currentUser.name;
   document.getElementById('adminBtn').style.display = currentUser.admin ? 'inline-block' : 'none';
 
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
-
+  setupPushNotifications(id);
   setupPresence(id);
   listenMessages();
   listenPresenceBar();
+}
+
+// ---------- WEB PUSH (notificaciones reales, aunque la app esté cerrada) ----------
+const VAPID_PUBLIC_KEY = 'BJlDGXObXkSHhVl8cZmjEIr1CvfAghWlUNDmOac_gOpiW6lAd4rFYtdKqWnic9HHXDa_bC_D58NZoF2u8x44_9Y';
+// URL de tu función de Netlify que manda el push (se completa cuando despleguemos)
+const SEND_PUSH_URL = 'https://familia-chat.netlify.app/.netlify/functions/send-push';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+async function setupPushNotifications(memberId) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+  try {
+    const reg = await navigator.serviceWorker.register('./sw.js');
+
+    if ('Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+    if (Notification.permission !== 'granted') return;
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    // guardamos/actualizamos la suscripción de este miembro en Firebase
+    await db.ref('subscriptions/' + memberId).set(sub.toJSON());
+  } catch (e) {
+    console.warn('No se pudo activar el push:', e);
+  }
+}
+
+function notifyOthersOfNewMessage(text) {
+  fetch(SEND_PUSH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ senderId: currentUser.id, senderName: currentUser.name, text })
+  }).catch(() => { /* si falla el push, el chat sigue andando igual */ });
 }
 
 document.getElementById('logoutBtn').onclick = () => {
@@ -557,6 +599,7 @@ function sendMessage() {
     ts: firebase.database.ServerValue.TIMESTAMP,
     seenBy: { [currentUser.id]: true }
   });
+  notifyOthersOfNewMessage(text);
   input.value = '';
 }
 
