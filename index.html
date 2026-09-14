@@ -625,10 +625,10 @@ async function startCall(toId, toName) {
     const status = snap.val();
     if (status === 'declined') {
       showCallScreen('❌ Llamada rechazada', toName);
-      setTimeout(() => endCall(false, callRef), 1800);
+      setTimeout(() => endCall(false, callRef), 60000);
     } else if (status === 'missed') {
       showCallScreen('📵 No atendió', toName);
-      setTimeout(() => endCall(false, callRef), 1800);
+      setTimeout(() => endCall(false, callRef), 60000);
     } else if (status === 'ended') {
       endCall(false, callRef);
     }
