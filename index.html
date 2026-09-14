@@ -106,6 +106,10 @@ if ('caches' in window) {
   #presenceBar span{margin-right:12px;}
   #presenceBar .dot{display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; background:var(--text-dim);}
   #presenceBar .dot.online{background:var(--online);}
+  #audioUnlockHint{
+    background:var(--accent-soft); color:var(--accent); font-size:12px;
+    text-align:center; padding:6px 10px; cursor:pointer;
+  }
   .call-btn{
     border:none; background:none; color:var(--accent); font-size:13px;
     margin-left:4px; padding:0 2px; cursor:pointer; vertical-align:middle;
@@ -199,6 +203,7 @@ if ('caches' in window) {
     <button class="icon" id="legendBtn" title="Referencias">ⓘ</button>
     <button class="icon" id="logoutBtn" title="Salir">↩</button>
   </header>
+  <div id="audioUnlockHint" class="hidden">🔔 Tocá la pantalla una vez para activar el sonido de llamadas</div>
   <div id="legendPopover" class="hidden">
     <div><span class="sym">✓</span> Enviado, no leído</div>
     <div><span class="sym seen-sym">✓✓</span> Visto (te muestra quién)</div>
@@ -365,6 +370,12 @@ function enterChat(id) {
   listenPresenceBar();
   listenForIncomingCalls();
   checkCallFromUrl();
+
+  // en iOS, si entramos sin tocar nada (sesión guardada), el audio sigue bloqueado
+  // hasta el primer toque — mostramos un aviso para que no se pierda el timbre de llamada
+  if (!sharedAudioCtx) {
+    document.getElementById('audioUnlockHint').classList.remove('hidden');
+  }
 }
 
 // limpia el numerito del ícono Y el contador interno que usa el Service Worker,
@@ -738,6 +749,8 @@ function unlockAudio() {
   if (sharedAudioCtx.state === 'suspended') {
     sharedAudioCtx.resume();
   }
+  const hint = document.getElementById('audioUnlockHint');
+  if (hint) hint.classList.add('hidden');
 }
 document.addEventListener('click', unlockAudio, { capture: true });
 document.addEventListener('touchstart', unlockAudio, { capture: true });
