@@ -148,6 +148,25 @@ if ('caches' in window) {
     width:110px; height:110px; border-radius:50%; background:var(--panel-2);
     display:flex; align-items:center; justify-content:center; font-size:44px; font-weight:700;
     color:var(--accent); position:relative; z-index:1; border:2px solid var(--accent);
+    animation:avatarWobble 0.9s ease-in-out infinite;
+    transform-origin:50% 85%;
+  }
+  @keyframes avatarWobble{
+    0%, 100%{transform:rotate(0deg) translateY(0);}
+    15%{transform:rotate(-11deg) translateY(-5px);}
+    30%{transform:rotate(9deg) translateY(0);}
+    45%{transform:rotate(-7deg) translateY(-3px);}
+    60%{transform:rotate(7deg) translateY(0);}
+    80%{transform:rotate(-2deg);}
+  }
+  .phone-badge{
+    position:absolute; bottom:-6px; right:-10px; font-size:30px; z-index:2;
+    animation:badgeJiggle 0.55s ease-in-out infinite;
+    filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));
+  }
+  @keyframes badgeJiggle{
+    0%, 100%{transform:scale(1) rotate(-6deg);}
+    50%{transform:scale(1.3) rotate(22deg);}
   }
   @keyframes pulseRing{
     0%{transform:scale(0.8); opacity:0.45;}
@@ -250,6 +269,7 @@ if ('caches' in window) {
     <div class="ring-pulse"></div>
     <div class="ring-pulse delay"></div>
     <div class="avatar" id="incomingCallAvatar"></div>
+    <span class="phone-badge">📳</span>
   </div>
   <div id="incomingCallFrom"></div>
   <div class="incoming-call-actions">
