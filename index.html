@@ -106,6 +106,38 @@ if ('caches' in window) {
   #presenceBar span{margin-right:12px;}
   #presenceBar .dot{display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; background:var(--text-dim);}
   #presenceBar .dot.online{background:var(--online);}
+  .call-btn{
+    border:none; background:none; color:var(--accent); font-size:13px;
+    margin-left:4px; padding:0 2px; cursor:pointer; vertical-align:middle;
+  }
+
+  /* ---------- LLAMADA ---------- */
+  #callScreen{
+    position:fixed; inset:0; background:#0c0d10; z-index:50;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:16px; padding:24px; text-align:center;
+  }
+  #callScreen video{border-radius:14px; background:#000;}
+  #remoteVideo{width:100%; max-width:420px; max-height:55vh;}
+  #localVideo{position:absolute; bottom:110px; right:16px; width:100px; border:2px solid var(--panel-2); border-radius:10px;}
+  #callStatusLabel{font-size:16px; color:var(--text-dim);}
+  #callWithLabel{font-size:20px; font-weight:600;}
+  .call-controls{display:flex; gap:16px; margin-top:8px;}
+  .call-controls button{
+    width:56px; height:56px; border-radius:50%; border:none; font-size:22px; cursor:pointer;
+  }
+  #hangupBtn{background:var(--danger); color:#fff;}
+
+  #incomingCallBanner{
+    position:fixed; top:0; left:0; right:0; z-index:60;
+    background:var(--panel-2); border-bottom:1px solid #333846;
+    padding:14px 16px; display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  #incomingCallBanner button{
+    padding:8px 14px; border-radius:8px; border:none; font-weight:600; cursor:pointer;
+  }
+  #answerCallBtn{background:var(--online); color:#08130d;}
+  #declineCallBtn{background:var(--danger); color:#fff;}
   #inputBar{display:flex; gap:8px; padding:10px; padding-bottom:calc(10px + env(safe-area-inset-bottom)); background:var(--panel); border-top:1px solid #262a34;}
   #inputBar input{flex:1; padding:11px 14px; border-radius:20px; border:none; background:var(--panel-2); color:var(--text); font-size:15px;}
   #inputBar button{width:42px; height:42px; border-radius:50%; border:none; background:var(--accent); color:#1a1400; font-size:18px; cursor:pointer;}
@@ -182,6 +214,26 @@ if ('caches' in window) {
   <div id="inputBar">
     <input id="msgInput" type="text" placeholder="Escribí un mensaje..." autocomplete="off">
     <button id="sendBtn">➤</button>
+  </div>
+</div>
+
+<!-- BANNER DE LLAMADA ENTRANTE -->
+<div id="incomingCallBanner" class="hidden">
+  <div>📞 <span id="incomingCallFrom"></span> te está llamando</div>
+  <div>
+    <button id="declineCallBtn">Rechazar</button>
+    <button id="answerCallBtn">Atender</button>
+  </div>
+</div>
+
+<!-- PANTALLA DE LLAMADA -->
+<div id="callScreen" class="hidden">
+  <div id="callWithLabel"></div>
+  <div id="callStatusLabel">Llamando...</div>
+  <video id="remoteVideo" autoplay playsinline></video>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <div class="call-controls">
+    <button id="hangupBtn" title="Colgar">✕</button>
   </div>
 </div>
 
@@ -311,6 +363,8 @@ function enterChat(id) {
   setupPresence(id);
   listenMessages();
   listenPresenceBar();
+  listenForIncomingCalls();
+  checkCallFromUrl();
 }
 
 // limpia el numerito del ícono Y el contador interno que usa el Service Worker,
@@ -382,6 +436,174 @@ function notifyOthersOfNewMessage(text) {
   }).catch(() => { /* si falla el push, el chat sigue andando igual */ });
 }
 
+// ---------- LLAMADAS (WebRTC, señalización vía Firebase) ----------
+const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+let pc = null;
+let localStream = null;
+let currentCallId = null;
+let pendingIncomingCallId = null;
+
+function showCallScreen(status, withName) {
+  document.getElementById('callScreen').classList.remove('hidden');
+  document.getElementById('callWithLabel').textContent = withName || '';
+  document.getElementById('callStatusLabel').textContent = status;
+}
+function hideCallScreen() {
+  document.getElementById('callScreen').classList.add('hidden');
+  document.getElementById('localVideo').srcObject = null;
+  document.getElementById('remoteVideo').srcObject = null;
+}
+function showIncomingCallUI(fromName) {
+  document.getElementById('incomingCallFrom').textContent = fromName;
+  document.getElementById('incomingCallBanner').classList.remove('hidden');
+}
+function hideIncomingCallUI() {
+  document.getElementById('incomingCallBanner').classList.add('hidden');
+}
+
+async function startCall(toId, toName) {
+  if (currentCallId) return; // ya hay una llamada en curso
+  currentCallId = db.ref('calls').push().key;
+  const callRef = db.ref('calls/' + currentCallId);
+  showCallScreen('Llamando...', toName);
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+  } catch (e) {
+    alert('No se pudo acceder a cámara/micrófono: ' + e.message);
+    hideCallScreen(); currentCallId = null; return;
+  }
+  document.getElementById('localVideo').srcObject = localStream;
+
+  pc = new RTCPeerConnection(RTC_CONFIG);
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  pc.ontrack = e => { document.getElementById('remoteVideo').srcObject = e.streams[0]; };
+  pc.onicecandidate = e => { if (e.candidate) callRef.child('callerCandidates').push(e.candidate.toJSON()); };
+
+  await callRef.set({
+    from: currentUser.id, fromName: currentUser.name, to: toId,
+    status: 'ringing', createdAt: Date.now()
+  });
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await callRef.child('offer').set({ type: offer.type, sdp: offer.sdp });
+
+  // push por si la otra persona no tiene la app abierta
+  fetch(SEND_PUSH_URL, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'call', callId: currentCallId, toId, senderId: currentUser.id, senderName: currentUser.name })
+  }).catch(() => {});
+
+  callRef.child('answer').on('value', async snap => {
+    const answer = snap.val();
+    if (answer && pc && !pc.currentRemoteDescription) {
+      await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      showCallScreen('En llamada', toName);
+    }
+  });
+  callRef.child('calleeCandidates').on('child_added', snap => {
+    if (pc) pc.addIceCandidate(new RTCIceCandidate(snap.val())).catch(() => {});
+  });
+  callRef.child('status').on('value', snap => {
+    if (snap.val() === 'declined' || snap.val() === 'ended') endCall(false, callRef);
+  });
+}
+
+async function answerCall(callId) {
+  hideIncomingCallUI();
+  const callRef = db.ref('calls/' + callId);
+  const snap = await callRef.once('value');
+  const call = snap.val();
+  if (!call || call.status !== 'ringing') return;
+
+  currentCallId = callId;
+  showCallScreen('Conectando...', call.fromName);
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+  } catch (e) {
+    alert('No se pudo acceder a cámara/micrófono: ' + e.message);
+    hideCallScreen(); currentCallId = null; return;
+  }
+  document.getElementById('localVideo').srcObject = localStream;
+
+  pc = new RTCPeerConnection(RTC_CONFIG);
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  pc.ontrack = e => { document.getElementById('remoteVideo').srcObject = e.streams[0]; };
+  pc.onicecandidate = e => { if (e.candidate) callRef.child('calleeCandidates').push(e.candidate.toJSON()); };
+
+  await pc.setRemoteDescription(new RTCSessionDescription(call.offer));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  await callRef.child('answer').set({ type: answer.type, sdp: answer.sdp });
+  await callRef.child('status').set('accepted');
+  showCallScreen('En llamada', call.fromName);
+
+  callRef.child('callerCandidates').on('child_added', snap2 => {
+    if (pc) pc.addIceCandidate(new RTCIceCandidate(snap2.val())).catch(() => {});
+  });
+  callRef.child('status').on('value', snap2 => {
+    if (snap2.val() === 'ended') endCall(false, callRef);
+  });
+}
+
+function declineCall(callId) {
+  db.ref('calls/' + callId + '/status').set('declined');
+  hideIncomingCallUI();
+  pendingIncomingCallId = null;
+}
+
+function endCall(notifyOther, callRefOverride) {
+  const callRef = callRefOverride || (currentCallId ? db.ref('calls/' + currentCallId) : null);
+  if (callRef) {
+    callRef.off();
+    if (notifyOther) callRef.child('status').set('ended');
+  }
+  if (pc) { pc.close(); pc = null; }
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  currentCallId = null;
+  hideCallScreen();
+}
+
+document.getElementById('hangupBtn').onclick = () => endCall(true);
+document.getElementById('declineCallBtn').onclick = () => declineCall(pendingIncomingCallId);
+document.getElementById('answerCallBtn').onclick = () => {
+  const id = pendingIncomingCallId; pendingIncomingCallId = null; answerCall(id);
+};
+
+// escucha llamadas entrantes mientras la app está abierta/en foco
+function listenForIncomingCalls() {
+  db.ref('calls').orderByChild('to').equalTo(currentUser.id).on('child_added', snap => {
+    const call = snap.val();
+    const ageMs = Date.now() - (call.createdAt || 0);
+    if (call.status === 'ringing' && !currentCallId && ageMs < 45000) {
+      pendingIncomingCallId = snap.key;
+      showIncomingCallUI(call.fromName);
+    }
+  });
+}
+
+// si se abrió la app desde la notificación push de una llamada (?call=ID)
+function checkCallFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const callId = params.get('call');
+  if (callId) {
+    pendingIncomingCallId = callId;
+    showIncomingCallUI('...');
+    db.ref('calls/' + callId).once('value', snap => {
+      const call = snap.val();
+      if (call && call.status === 'ringing') {
+        document.getElementById('incomingCallFrom').textContent = call.fromName;
+      } else {
+        hideIncomingCallUI();
+        pendingIncomingCallId = null;
+      }
+    });
+    history.replaceState({}, '', location.pathname);
+  }
+}
+
 document.getElementById('logoutBtn').onclick = () => {
   localStorage.removeItem('myMemberId');
   location.reload();
@@ -441,6 +663,12 @@ function renderPresenceBar(presence) {
     const isOnline = p.lastSeen && (Date.now() - p.lastSeen) < ONLINE_GRACE_MS;
     let label = isOnline ? 'en línea' : (p.lastSeen ? 'últ. vez ' + timeAgo(p.lastSeen) : 'sin conexión');
     span.innerHTML = `<span class="dot ${isOnline ? 'online' : ''}"></span>${m.name}: ${label}`;
+    const callBtn = document.createElement('button');
+    callBtn.className = 'call-btn';
+    callBtn.textContent = '📞';
+    callBtn.title = 'Llamar a ' + m.name;
+    callBtn.onclick = () => startCall(id, m.name);
+    span.appendChild(callBtn);
     bar.appendChild(span);
   });
 }
