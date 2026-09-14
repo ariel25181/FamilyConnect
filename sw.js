@@ -41,6 +41,26 @@ self.addEventListener('push', (event) => {
     if (event.data) data = event.data.json();
   } catch (e) {}
 
+  // ---------- LLAMADA ENTRANTE ----------
+  // payload distinto del mensaje normal: incluye botones de Atender/Rechazar
+  // directo en la notificación, sin necesidad de abrir la app para rechazar.
+  if (data.type === 'call') {
+    const options = {
+      body: 'Toca "Atender" para responder',
+      tag: 'incoming-call-' + data.callId,
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [300, 150, 300, 150, 300],
+      actions: [
+        { action: 'answer', title: '✅ Atender' },
+        { action: 'decline', title: '❌ Rechazar' }
+      ],
+      data: { callId: data.callId, url: './?call=' + data.callId }
+    };
+    event.waitUntil(self.registration.showNotification('📞 Llamada de ' + (data.senderName || 'Familia'), options));
+    return;
+  }
+
   const options = {
     body: data.body,
     icon: data.icon || undefined,
@@ -62,8 +82,23 @@ self.addEventListener('push', (event) => {
 });
 
 self.addEventListener('notificationclick', (event) => {
+  const notifData = event.notification.data || {};
+
+  // ---------- acción "Rechazar" en una llamada: no hace falta abrir la app ----------
+  if (event.action === 'decline' && notifData.callId) {
+    event.notification.close();
+    event.waitUntil(
+      fetch(FIREBASE_DB_URL + '/calls/' + notifData.callId + '/status.json', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify('declined')
+      }).catch(() => {})
+    );
+    return;
+  }
+
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || './';
+  const targetUrl = notifData.url || './';
 
   event.waitUntil((async () => {
     if ('clearAppBadge' in self.navigator) {
@@ -72,7 +107,13 @@ self.addEventListener('notificationclick', (event) => {
     }
     const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of clientList) {
-      if ('focus' in client) return client.focus();
+      // si ya está abierta, la navegamos al link de la llamada (o foco simple si es mensaje normal)
+      if ('focus' in client) {
+        if (notifData.callId && 'navigate' in client) {
+          try { await client.navigate(targetUrl); } catch (e) {}
+        }
+        return client.focus();
+      }
     }
     if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
   })());
