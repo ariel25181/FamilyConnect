@@ -14,7 +14,37 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { senderId, senderName, text } = JSON.parse(event.body);
+    const body = JSON.parse(event.body);
+
+    // ---------- PUSH DE LLAMADA: va solo al destinatario, no a todos ----------
+    if (body.type === 'call') {
+      const { callId, toId, senderId, senderName } = body;
+
+      const subRes = await fetch(FIREBASE_DB_URL + '/subscriptions/' + toId + '.json');
+      const sub = await subRes.json();
+      if (!sub) return { statusCode: 200, body: JSON.stringify({ sent: 0, reason: 'no subscription for toId' }) };
+
+      const payload = JSON.stringify({
+        type: 'call',
+        callId,
+        senderId,
+        senderName
+      });
+
+      try {
+        await webpush.sendNotification(sub, payload);
+      } catch (err) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          await fetch(FIREBASE_DB_URL + '/subscriptions/' + toId + '.json', { method: 'DELETE' });
+        }
+        throw err;
+      }
+
+      return { statusCode: 200, body: JSON.stringify({ sent: 1 }) };
+    }
+
+    // ---------- PUSH DE MENSAJE NORMAL: broadcast a todos menos el que envió ----------
+    const { senderId, senderName, text } = body;
 
     const res = await fetch(FIREBASE_DB_URL + '/subscriptions.json');
     const subscriptions = await res.json() || {};
