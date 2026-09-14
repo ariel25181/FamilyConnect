@@ -456,9 +456,42 @@ function hideCallScreen() {
 function showIncomingCallUI(fromName) {
   document.getElementById('incomingCallFrom').textContent = fromName;
   document.getElementById('incomingCallBanner').classList.remove('hidden');
+  startRingtone();
 }
 function hideIncomingCallUI() {
   document.getElementById('incomingCallBanner').classList.add('hidden');
+  stopRingtone();
+}
+
+// ---------- TONO DE LLAMADA (ring-ring en loop, distinto del beep de mensaje) ----------
+let ringtoneInterval = null;
+function playRingPair() {
+  try {
+    if (!sharedAudioCtx) { unlockAudio(); }
+    if (!sharedAudioCtx) return;
+    if (sharedAudioCtx.state === 'suspended') { sharedAudioCtx.resume(); }
+    const ctx = sharedAudioCtx;
+    [0, 0.45].forEach(offset => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 950;
+      const t0 = ctx.currentTime + offset;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
+      osc.start(t0); osc.stop(t0 + 0.35);
+    });
+  } catch (e) { /* audio no disponible, ignorar */ }
+}
+function startRingtone() {
+  stopRingtone();
+  unlockAudio();
+  playRingPair();
+  ringtoneInterval = setInterval(playRingPair, 1800);
+}
+function stopRingtone() {
+  if (ringtoneInterval) { clearInterval(ringtoneInterval); ringtoneInterval = null; }
 }
 
 async function startCall(toId, toName) {
@@ -580,6 +613,14 @@ function listenForIncomingCalls() {
     if (call.status === 'ringing' && !currentCallId && ageMs < 45000) {
       pendingIncomingCallId = snap.key;
       showIncomingCallUI(call.fromName);
+      // si quien llama corta antes de que atiendas, dejar de sonar y esconder el banner
+      db.ref('calls/' + snap.key + '/status').on('value', statusSnap => {
+        if (statusSnap.val() === 'ended' && pendingIncomingCallId === snap.key) {
+          db.ref('calls/' + snap.key + '/status').off();
+          pendingIncomingCallId = null;
+          hideIncomingCallUI();
+        }
+      });
     }
   });
 }
