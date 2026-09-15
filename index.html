@@ -582,6 +582,7 @@ async function startCall(toId, toName) {
   currentCallId = db.ref('calls').push().key;
   const callRef = db.ref('calls/' + currentCallId);
   showCallScreen('Llamando...', toName);
+  startRingtone(); // el emisor también escucha el tono mientras espera
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -614,6 +615,7 @@ async function startCall(toId, toName) {
   callRef.child('answer').on('value', async snap => {
     const answer = snap.val();
     if (answer && pc && !pc.currentRemoteDescription) {
+      stopRingtone();
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
       showCallScreen('En llamada', toName);
     }
@@ -624,12 +626,15 @@ async function startCall(toId, toName) {
   callRef.child('status').on('value', snap => {
     const status = snap.val();
     if (status === 'declined') {
+      stopRingtone();
       showCallScreen('❌ Llamada rechazada', toName);
       setTimeout(() => endCall(false, callRef), 60000);
     } else if (status === 'missed') {
+      stopRingtone();
       showCallScreen('📵 No atendió', toName);
       setTimeout(() => endCall(false, callRef), 60000);
     } else if (status === 'ended') {
+      stopRingtone();
       endCall(false, callRef);
     }
   });
@@ -680,6 +685,7 @@ function declineCall(callId) {
 }
 
 function endCall(notifyOther, callRefOverride) {
+  stopRingtone();
   const callRef = callRefOverride || (currentCallId ? db.ref('calls/' + currentCallId) : null);
   if (callRef) {
     callRef.off();
