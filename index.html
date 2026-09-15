@@ -338,20 +338,22 @@ function initFirebase(cfg) {
 
 // ---------- LOGIN ----------
 function bootLogin() {
-  document.getElementById('login').classList.remove('hidden');
   db.ref('members').on('value', snap => {
     membersCache = snap.val() || {};
+    // si el dispositivo ya tiene sesión guardada, entra directo — nunca mostramos
+    // la pantalla de "quién sos" en ese caso (evita el parpadeo al abrir desde una notificación)
+    const savedId = localStorage.getItem('myMemberId');
+    if (savedId && membersCache[savedId] && !currentUser) {
+      enterChat(savedId);
+      return;
+    }
+    document.getElementById('login').classList.remove('hidden');
     if (Object.keys(membersCache).length === 0) {
       // first run: seed the creator as admin
       document.getElementById('loginHint').textContent = 'No hay miembros todavía. Creá tu usuario como administrador.';
       renderQuickCreateAdmin();
     } else {
       renderMemberList();
-    }
-    // if already logged in on this device, auto-enter
-    const savedId = localStorage.getItem('myMemberId');
-    if (savedId && membersCache[savedId] && !currentUser) {
-      enterChat(savedId);
     }
   });
 }
