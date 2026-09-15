@@ -50,7 +50,8 @@ self.addEventListener('push', (event) => {
       tag: 'incoming-call-' + data.callId,
       renotify: true,
       requireInteraction: true,
-      vibrate: [300, 150, 300, 150, 300],
+      silent: false,
+      vibrate: [400, 200, 400, 200, 400, 200, 400, 200, 400],
       actions: [
         { action: 'answer', title: '✅ Atender' },
         { action: 'decline', title: '❌ Rechazar' }
