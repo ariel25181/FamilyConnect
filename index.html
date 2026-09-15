@@ -608,6 +608,15 @@ async function startCall(toId, toName) {
   await pc.setLocalDescription(offer);
   await callRef.child('offer').set({ type: offer.type, sdp: offer.sdp });
 
+  // chequear si el receptor tiene notificaciones push activas en este dispositivo;
+  // si no, avisar al emisor en vez de dejarlo creer que va a sonar en todos lados
+  db.ref('subscriptions/' + toId).once('value', subSnap => {
+    if (!subSnap.exists() && currentCallId) {
+      const label = document.getElementById('callStatusLabel');
+      if (label) label.innerHTML = 'Llamando...<br><span style="font-size:12px;color:var(--danger)">⚠️ Sin notificaciones activas — solo va a sonar si tiene la app abierta</span>';
+    }
+  });
+
   // push por si la otra persona no tiene la app abierta
   fetch(SEND_PUSH_URL, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
