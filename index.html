@@ -621,6 +621,19 @@ async function startCall(toId, toName) {
   fetch(SEND_PUSH_URL, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'call', callId: currentCallId, toId, senderId: currentUser.id, senderName: currentUser.name })
+  }).then(async res => {
+    const data = await res.json().catch(() => null);
+    if (data && data.sent === 0) {
+      const label = document.getElementById('callStatusLabel');
+      if (label && currentCallId) {
+        const reasonText = {
+          no_subscription: '⚠️ No tiene notificaciones activas',
+          subscription_expired: '⚠️ Su notificación push venció — que abra la app una vez',
+          push_send_failed: '⚠️ Error enviando la notificación (revisar Netlify)'
+        }[data.reason] || '⚠️ No se pudo notificar (' + (data.reason || 'error') + ')';
+        label.innerHTML = 'Llamando...<br><span style="font-size:12px;color:var(--danger)">' + reasonText + '</span>';
+      }
+    }
   }).catch(() => {});
 
   callRef.child('answer').on('value', async snap => {
