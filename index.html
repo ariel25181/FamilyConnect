@@ -132,6 +132,17 @@ if ('caches' in window) {
   }
   #hangupBtn{background:var(--danger); color:#fff;}
 
+  #deviceStatusPanel{margin-bottom:18px; border-bottom:1px solid #333846; padding-bottom:14px;}
+  .device-status-title{font-size:13px; font-weight:700; color:var(--text-dim); margin-bottom:8px;}
+  .device-status-row{
+    display:flex; flex-direction:column; gap:2px; font-size:12px;
+    padding:8px 10px; margin-bottom:6px; background:var(--panel-2); border-radius:8px;
+  }
+  .device-status-row b{font-size:14px; margin-bottom:2px;}
+  .ds-ok{color:var(--online);}
+  .ds-bad{color:var(--danger);}
+  .ds-dim{color:var(--text-dim);}
+
   #incomingCallBanner{
     position:fixed; inset:0; z-index:60;
     background:linear-gradient(180deg, #14151a 0%, #0c0d10 100%);
@@ -302,6 +313,7 @@ if ('caches' in window) {
     <button class="icon" id="closeAdminBtn">✕</button>
   </header>
   <div class="content">
+    <div id="deviceStatusPanel"></div>
     <div id="memberAdminList"></div>
     <div id="addMemberForm">
       <input id="newMemberName" placeholder="Nombre (ej: Sofi)">
@@ -457,6 +469,8 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function setupPushNotifications(memberId) {
+  reportDeviceStatus(memberId); // reporta el estado aunque el permiso falle más abajo
+
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
   if (!('Notification' in window)) return;
 
@@ -466,7 +480,7 @@ async function setupPushNotifications(memberId) {
     if (Notification.permission === 'default') {
       await Notification.requestPermission();
     }
-    if (Notification.permission !== 'granted') return;
+    if (Notification.permission !== 'granted') { reportDeviceStatus(memberId); return; }
 
     await navigator.serviceWorker.register('./sw.js');
     // esperamos a que el Service Worker esté REALMENTE activo (no solo registrado)
@@ -489,9 +503,32 @@ async function setupPushNotifications(memberId) {
     if (reg.active) {
       reg.active.postMessage({ type: 'SET_MEMBER_ID', memberId });
     }
+    reportDeviceStatus(memberId, sub);
   } catch (e) {
     console.warn('No se pudo activar el push:', e);
+    reportDeviceStatus(memberId);
   }
+}
+
+// ---------- DIAGNÓSTICO: cada dispositivo reporta su propio estado ----------
+// así, desde el panel de admin, se puede ver por qué a alguien no le llegan
+// notificaciones sin tener que pedirle que revise Ajustes a mano.
+async function reportDeviceStatus(memberId, sub) {
+  try {
+    let swState = 'no soportado';
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration('./');
+      swState = reg && reg.active ? 'activo' : (reg ? 'registrado sin activar' : 'no registrado');
+    }
+    await db.ref('deviceStatus/' + memberId).set({
+      notificationPermission: ('Notification' in window) ? Notification.permission : 'no soportado',
+      serviceWorker: swState,
+      pushSubscribed: !!sub,
+      standalone: (window.navigator.standalone === true) || window.matchMedia('(display-mode: standalone)').matches,
+      userAgent: navigator.userAgent,
+      lastReported: Date.now()
+    });
+  } catch (e) { /* si falla el diagnóstico, no bloquear nada más */ }
 }
 
 function notifyOthersOfNewMessage(text) {
@@ -1026,7 +1063,38 @@ function sendMessage() {
 document.getElementById('adminBtn').onclick = () => {
   document.getElementById('adminPanel').classList.remove('hidden');
   renderAdminList();
+  renderDeviceStatusPanel();
 };
+
+function renderDeviceStatusPanel() {
+  const box = document.getElementById('deviceStatusPanel');
+  box.innerHTML = '<p class="hint">Cargando estado de dispositivos...</p>';
+  db.ref('deviceStatus').once('value', snap => {
+    const statuses = snap.val() || {};
+    box.innerHTML = '<div class="device-status-title">📶 Estado de notificaciones por miembro</div>';
+    Object.entries(membersCache).forEach(([id, m]) => {
+      const st = statuses[id];
+      const row = document.createElement('div');
+      row.className = 'device-status-row';
+      if (!st) {
+        row.innerHTML = `<b>${m.name}</b><span class="ds-bad">nunca reportó (nunca abrió la app en este dispositivo instalado)</span>`;
+      } else {
+        const perm = st.notificationPermission;
+        const permOk = perm === 'granted';
+        const subOk = !!st.pushSubscribed;
+        const standaloneOk = !!st.standalone;
+        const ageMin = Math.round((Date.now() - (st.lastReported || 0)) / 60000);
+        row.innerHTML = `
+          <b>${m.name}</b>
+          <span class="${permOk ? 'ds-ok' : 'ds-bad'}">Permiso: ${perm}</span>
+          <span class="${subOk ? 'ds-ok' : 'ds-bad'}">Suscripción push: ${subOk ? 'sí' : 'no'}</span>
+          <span class="${standaloneOk ? 'ds-ok' : 'ds-bad'}">Instalada en inicio: ${standaloneOk ? 'sí' : 'no (pestaña de Safari)'}</span>
+          <span class="ds-dim">Reportado hace ${ageMin < 1 ? '<1' : ageMin} min</span>`;
+      }
+      box.appendChild(row);
+    });
+  });
+}
 document.getElementById('closeAdminBtn').onclick = () => document.getElementById('adminPanel').classList.add('hidden');
 
 function renderAdminList() {
