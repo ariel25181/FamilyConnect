@@ -135,8 +135,8 @@ if ('caches' in window) {
   #deviceStatusPanel{margin-bottom:18px; border-bottom:1px solid #333846; padding-bottom:14px;}
   .device-status-title{font-size:13px; font-weight:700; color:var(--text-dim); margin-bottom:8px;}
   .device-status-row{
-    display:flex; flex-direction:column; gap:2px; font-size:12px;
-    padding:8px 10px; margin-bottom:6px; background:var(--panel-2); border-radius:8px;
+    display:flex; flex-direction:column; gap:3px; font-size:12px;
+    padding:10px; margin-bottom:8px; background:var(--panel-2); border-radius:8px;
   }
   .device-status-row b{font-size:14px; margin-bottom:2px;}
   .ds-ok{color:var(--online);}
@@ -1069,28 +1069,63 @@ document.getElementById('adminBtn').onclick = () => {
 function renderDeviceStatusPanel() {
   const box = document.getElementById('deviceStatusPanel');
   box.innerHTML = '<p class="hint">Cargando estado de dispositivos...</p>';
-  db.ref('deviceStatus').once('value', snap => {
-    const statuses = snap.val() || {};
-    box.innerHTML = '<div class="device-status-title">📶 Estado de notificaciones por miembro</div>';
+
+  Promise.all([
+    db.ref('deviceStatus').once('value'),
+    db.ref('subscriptions').once('value'),
+    db.ref('calls').once('value')
+  ]).then(([statusSnap, subSnap, callsSnap]) => {
+    const statuses = statusSnap.val() || {};
+    const subs = subSnap.val() || {};
+    const calls = callsSnap.val() || {};
+
+    // últimas 3 llamadas (enviadas o recibidas) por miembro, más nuevas primero
+    const callsByMember = {};
+    Object.values(calls)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .forEach(c => {
+        [c.from, c.to].forEach(memberId => {
+          if (!memberId) return;
+          if (!callsByMember[memberId]) callsByMember[memberId] = [];
+          if (callsByMember[memberId].length < 3) callsByMember[memberId].push(c);
+        });
+      });
+
+    const statusLabels = { ringing: '📞 sonando', accepted: '✅ atendida', declined: '❌ rechazada', missed: '📵 no atendida', ended: '🔚 finalizada' };
+
+    box.innerHTML = '<div class="device-status-title">📶 Estado por persona</div>';
     Object.entries(membersCache).forEach(([id, m]) => {
       const st = statuses[id];
+      const hasSub = !!subs[id];
+      const recentCalls = callsByMember[id] || [];
+
       const row = document.createElement('div');
       row.className = 'device-status-row';
+
+      let html = `<b>${m.name}</b>`;
       if (!st) {
-        row.innerHTML = `<b>${m.name}</b><span class="ds-bad">nunca reportó (nunca abrió la app en este dispositivo instalado)</span>`;
+        html += `<span class="ds-bad">nunca reportó — todavía no abrió la app en su dispositivo instalado</span>`;
       } else {
-        const perm = st.notificationPermission;
-        const permOk = perm === 'granted';
-        const subOk = !!st.pushSubscribed;
-        const standaloneOk = !!st.standalone;
+        const permOk = st.notificationPermission === 'granted';
         const ageMin = Math.round((Date.now() - (st.lastReported || 0)) / 60000);
-        row.innerHTML = `
-          <b>${m.name}</b>
-          <span class="${permOk ? 'ds-ok' : 'ds-bad'}">Permiso: ${perm}</span>
-          <span class="${subOk ? 'ds-ok' : 'ds-bad'}">Suscripción push: ${subOk ? 'sí' : 'no'}</span>
-          <span class="${standaloneOk ? 'ds-ok' : 'ds-bad'}">Instalada en inicio: ${standaloneOk ? 'sí' : 'no (pestaña de Safari)'}</span>
+        html += `
+          <span class="${permOk ? 'ds-ok' : 'ds-bad'}">Permiso: ${st.notificationPermission}</span>
+          <span class="${st.standalone ? 'ds-ok' : 'ds-bad'}">Instalada en inicio: ${st.standalone ? 'sí' : 'no (pestaña de Safari)'}</span>
           <span class="ds-dim">Reportado hace ${ageMin < 1 ? '<1' : ageMin} min</span>`;
       }
+      html += `<span class="${hasSub ? 'ds-ok' : 'ds-bad'}">Suscripción push en /subscriptions: ${hasSub ? 'sí' : 'no'}</span>`;
+
+      if (recentCalls.length) {
+        html += `<span class="ds-dim" style="margin-top:4px;">Últimas llamadas:</span>`;
+        recentCalls.forEach(c => {
+          const otherName = c.from === id ? (membersCache[c.to] ? membersCache[c.to].name : '?') : c.fromName;
+          const dir = c.from === id ? '→' : '←';
+          const when = c.createdAt ? new Date(c.createdAt).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+          html += `<span class="ds-dim">${dir} ${otherName} · ${statusLabels[c.status] || c.status} · ${when}</span>`;
+        });
+      }
+
+      row.innerHTML = html;
       box.appendChild(row);
     });
   });
