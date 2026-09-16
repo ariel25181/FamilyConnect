@@ -22,7 +22,7 @@ exports.handler = async (event) => {
 
       const subRes = await fetch(FIREBASE_DB_URL + '/subscriptions/' + toId + '.json');
       const sub = await subRes.json();
-      if (!sub) return { statusCode: 200, body: JSON.stringify({ sent: 0, reason: 'no subscription for toId' }) };
+      if (!sub) return { statusCode: 200, body: JSON.stringify({ sent: 0, reason: 'no_subscription' }) };
 
       const payload = JSON.stringify({
         type: 'call',
@@ -36,8 +36,9 @@ exports.handler = async (event) => {
       } catch (err) {
         if (err.statusCode === 410 || err.statusCode === 404) {
           await fetch(FIREBASE_DB_URL + '/subscriptions/' + toId + '.json', { method: 'DELETE' });
+          return { statusCode: 200, body: JSON.stringify({ sent: 0, reason: 'subscription_expired' }) };
         }
-        throw err;
+        return { statusCode: 200, body: JSON.stringify({ sent: 0, reason: 'push_send_failed', detail: String(err.statusCode || err.message || err) }) };
       }
 
       return { statusCode: 200, body: JSON.stringify({ sent: 1 }) };
