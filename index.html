@@ -736,6 +736,7 @@ async function answerCall(callId) {
   await pc.setLocalDescription(answer);
   await callRef.child('answer').set({ type: answer.type, sdp: answer.sdp });
   await callRef.child('status').set('accepted');
+  await callRef.child('acceptedAt').set(Date.now()); // para distinguir "nunca atendió" de "atendió y cortó rápido"
   showCallScreen('En llamada', call.fromName);
 
   callRef.child('callerCandidates').on('child_added', snap2 => {
@@ -1098,7 +1099,11 @@ function renderDeviceStatusPanel() {
         });
       });
 
-    const statusLabels = { ringing: '📞 sonando', accepted: '✅ atendida', declined: '❌ rechazada', missed: '📵 no atendida', ended: '🔚 finalizada' };
+    const statusLabels = { ringing: '📞 sonando', accepted: '✅ atendida', declined: '❌ rechazada', missed: '📵 no atendida' };
+    function labelForCall(c) {
+      if (c.status === 'ended') return c.acceptedAt ? '🔚 finalizada (SÍ llegó a atender)' : '🔚 cortada (nunca la llegó a atender)';
+      return statusLabels[c.status] || c.status;
+    }
 
     box.innerHTML = '<div class="device-status-title">📶 Estado por persona</div>';
     Object.entries(membersCache).forEach(([id, m]) => {
@@ -1128,7 +1133,7 @@ function renderDeviceStatusPanel() {
           const otherName = c.from === id ? (membersCache[c.to] ? membersCache[c.to].name : '?') : c.fromName;
           const dir = c.from === id ? '→' : '←';
           const when = c.createdAt ? new Date(c.createdAt).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-          html += `<span class="ds-dim">${dir} ${otherName} · ${statusLabels[c.status] || c.status} · ${when}</span>`;
+          html += `<span class="ds-dim">${dir} ${otherName} · ${labelForCall(c)} · ${when}</span>`;
         });
       }
 
