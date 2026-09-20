@@ -699,6 +699,13 @@ async function startCall(toId, toName) {
       endCall(false, callRef);
     }
   });
+
+  // timeout propio del emisor: si a los 60s nadie respondió (ni siquiera el
+  // lado del receptor llegó a marcar "no atendida"), lo marcamos nosotros mismos
+  // en vez de dejar la pantalla de "Llamando..." esperando para siempre.
+  setTimeout(() => {
+    callRef.child('status').transaction(current => (current === 'ringing' ? 'missed' : current));
+  }, 60000);
 }
 
 async function answerCall(callId) {
