@@ -126,10 +126,6 @@ if ('caches' in window) {
   #localVideo{position:absolute; bottom:110px; right:16px; width:100px; border:2px solid var(--panel-2); border-radius:10px;}
   #callStatusLabel{font-size:16px; color:var(--text-dim);}
   #callWithLabel{font-size:20px; font-weight:600;}
-  #facetimeFallbackBtn{
-    display:inline-block; background:var(--online); color:#08130d; text-decoration:none;
-    padding:10px 18px; border-radius:20px; font-size:14px; font-weight:600; margin-top:4px;
-  }
   .call-controls{display:flex; gap:16px; margin-top:8px;}
   .call-controls button{
     width:56px; height:56px; border-radius:50%; border:none; font-size:22px; cursor:pointer;
@@ -305,7 +301,6 @@ if ('caches' in window) {
   <div id="callStatusLabel">Llamando...</div>
   <video id="remoteVideo" autoplay playsinline></video>
   <video id="localVideo" autoplay playsinline muted></video>
-  <a id="facetimeFallbackBtn" class="hidden" href="#">📹 Probar por FaceTime</a>
   <div class="call-controls">
     <button id="hangupBtn" title="Colgar">✕</button>
   </div>
@@ -555,24 +550,11 @@ function showCallScreen(status, withName) {
   document.getElementById('callScreen').classList.remove('hidden');
   document.getElementById('callWithLabel').textContent = withName || '';
   document.getElementById('callStatusLabel').textContent = status;
-  document.getElementById('facetimeFallbackBtn').classList.add('hidden'); // se muestra aparte solo si corresponde
 }
 function hideCallScreen() {
   document.getElementById('callScreen').classList.add('hidden');
   document.getElementById('localVideo').srcObject = null;
   document.getElementById('remoteVideo').srcObject = null;
-  document.getElementById('facetimeFallbackBtn').classList.add('hidden');
-}
-// muestra "Probar por FaceTime" solo si ese miembro tiene un Apple ID cargado en Admin
-function showFacetimeFallback(memberId) {
-  const m = membersCache[memberId];
-  const btn = document.getElementById('facetimeFallbackBtn');
-  if (m && m.facetimeId) {
-    btn.href = 'facetime://' + encodeURIComponent(m.facetimeId);
-    btn.classList.remove('hidden');
-  } else {
-    btn.classList.add('hidden');
-  }
 }
 function showIncomingCallUI(fromName) {
   document.getElementById('incomingCallFrom').textContent = fromName;
@@ -707,12 +689,10 @@ async function startCall(toId, toName) {
     if (status === 'declined') {
       stopRingtone();
       showCallScreen('❌ Llamada rechazada', toName);
-      showFacetimeFallback(toId);
       setTimeout(() => endCall(false, callRef), 60000);
     } else if (status === 'missed') {
       stopRingtone();
       showCallScreen('📵 No atendió', toName);
-      showFacetimeFallback(toId);
       setTimeout(() => endCall(false, callRef), 60000);
     } else if (status === 'ended') {
       stopRingtone();
@@ -1170,25 +1150,13 @@ function renderAdminList() {
   Object.entries(membersCache).forEach(([id, m]) => {
     const row = document.createElement('div');
     row.className = 'admin-row';
-    row.style.flexWrap = 'wrap';
-    row.innerHTML = `
-      <span class="name">${m.name}${m.admin ? ' (admin)' : ''}</span>
-      ${id !== currentUser.id ? '<button class="removeBtn">Quitar</button>' : ''}
-      <div style="flex-basis:100%; display:flex; gap:6px; margin-top:6px;">
-        <input type="text" class="facetimeInput" placeholder="Email o teléfono de Apple ID (FaceTime)"
-          value="${m.facetimeId || ''}" style="flex:1; padding:6px 8px; border-radius:6px; border:1px solid #333846; background:var(--panel-2); color:var(--text); font-size:12px;">
-        <button class="saveFacetimeBtn" style="padding:6px 10px; font-size:12px; background:var(--accent); color:#1a1400;">Guardar</button>
-      </div>`;
-    const btn = row.querySelector('.removeBtn');
+    row.innerHTML = `<span class="name">${m.name}${m.admin ? ' (admin)' : ''}</span>${id !== currentUser.id ? '<button>Quitar</button>' : ''}`;
+    const btn = row.querySelector('button');
     if (btn) btn.onclick = () => {
       if (confirm(`¿Quitar a ${m.name} del chat familiar?`)) {
         db.ref('members/' + id).remove();
         db.ref('presence/' + id).remove();
       }
-    };
-    row.querySelector('.saveFacetimeBtn').onclick = () => {
-      const val = row.querySelector('.facetimeInput').value.trim();
-      db.ref('members/' + id + '/facetimeId').set(val || null);
     };
     list.appendChild(row);
   });
