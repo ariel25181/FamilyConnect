@@ -213,7 +213,7 @@ if ('caches' in window) {
     position:fixed; inset:0; z-index:80; background:rgba(5,5,7,0.97);
     display:flex; align-items:center; justify-content:center;
   }
-  #imageLightbox img{max-width:92vw; max-height:82vh; border-radius:6px; object-fit:contain;}
+  #imageLightbox img{max-width:92vw; max-height:82vh; border-radius:6px; object-fit:contain; touch-action:none; transform-origin:center center;}
   #imageLightbox button{
     position:absolute; background:rgba(255,255,255,0.1); border:none; color:#fff;
     border-radius:50%; width:44px; height:44px; font-size:22px; cursor:pointer;
@@ -1145,6 +1145,7 @@ function openLightbox(idx) {
   document.getElementById('imageLightbox').classList.remove('hidden');
 }
 function renderLightbox() {
+  resetLbZoom();
   document.getElementById('lightboxImg').src = chatImageGallery[lightboxIndex];
   document.getElementById('lightboxCounter').textContent = (lightboxIndex + 1) + ' / ' + chatImageGallery.length;
   document.getElementById('lightboxPrev').style.visibility = lightboxIndex > 0 ? 'visible' : 'hidden';
@@ -1158,9 +1159,72 @@ document.getElementById('imageLightbox').addEventListener('click', (e) => {
   if (e.target.id === 'imageLightbox') document.getElementById('imageLightbox').classList.add('hidden');
 });
 // deslizar para pasar de foto en foto
-let lbTouchStartX = null;
-document.getElementById('imageLightbox').addEventListener('touchstart', (e) => { lbTouchStartX = e.touches[0].clientX; });
-document.getElementById('imageLightbox').addEventListener('touchend', (e) => {
+// ---------- zoom (pinch + doble-tap) y pan dentro de la foto ----------
+let lbScale = 1, lbTx = 0, lbTy = 0;
+let lbPinchStartDist = 0, lbPinchStartScale = 1;
+let lbPanStartX = 0, lbPanStartY = 0, lbPanStartTx = 0, lbPanStartTy = 0;
+let lbIsPinching = false;
+let lbTouchStartX = null; // usado solo para el swipe cuando NO hay zoom
+let lbLastTapTs = 0;
+
+function applyLbTransform() {
+  document.getElementById('lightboxImg').style.transform = `translate(${lbTx}px, ${lbTy}px) scale(${lbScale})`;
+}
+function resetLbZoom() {
+  lbScale = 1; lbTx = 0; lbTy = 0;
+  applyLbTransform();
+}
+function touchDist(t0, t1) {
+  return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+}
+
+const lightboxEl = document.getElementById('imageLightbox');
+
+lightboxEl.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) {
+    lbIsPinching = true;
+    lbPinchStartDist = touchDist(e.touches[0], e.touches[1]);
+    lbPinchStartScale = lbScale;
+  } else if (e.touches.length === 1) {
+    lbIsPinching = false;
+    lbTouchStartX = e.touches[0].clientX;
+    lbPanStartX = e.touches[0].clientX;
+    lbPanStartY = e.touches[0].clientY;
+    lbPanStartTx = lbTx; lbPanStartTy = lbTy;
+
+    // doble tap: alterna entre zoom normal y acercado
+    const now = Date.now();
+    if (now - lbLastTapTs < 300) {
+      if (lbScale > 1) { resetLbZoom(); } else { lbScale = 2.5; applyLbTransform(); }
+    }
+    lbLastTapTs = now;
+  }
+}, { passive: true });
+
+lightboxEl.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 2 && lbIsPinching) {
+    const dist = touchDist(e.touches[0], e.touches[1]);
+    lbScale = Math.min(4, Math.max(1, lbPinchStartScale * (dist / lbPinchStartDist)));
+    applyLbTransform();
+    e.preventDefault();
+  } else if (e.touches.length === 1 && lbScale > 1) {
+    // paneo mientras está con zoom — no pasa de foto
+    lbTx = lbPanStartTx + (e.touches[0].clientX - lbPanStartX);
+    lbTy = lbPanStartTy + (e.touches[0].clientY - lbPanStartY);
+    applyLbTransform();
+    e.preventDefault();
+  }
+}, { passive: false });
+
+lightboxEl.addEventListener('touchend', (e) => {
+  if (lbIsPinching) {
+    lbIsPinching = false;
+    if (lbScale < 1.05) resetLbZoom(); // si casi no hizo zoom, vuelve a tamaño normal
+    return;
+  }
+  if (lbScale > 1) return; // estaba paneando la foto ampliada, no cambiar de foto
+
+  // solo pasa de foto con swipe cuando la imagen está en tamaño normal
   if (lbTouchStartX === null) return;
   const diff = e.changedTouches[0].clientX - lbTouchStartX;
   if (diff > 50 && lightboxIndex > 0) { lightboxIndex--; renderLightbox(); }
