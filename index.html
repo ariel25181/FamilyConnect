@@ -208,6 +208,23 @@ if ('caches' in window) {
   #stopRecBtn{background:var(--online); color:#08130d; margin-left:8px;}
 
   .msg img.chat-image{max-width:220px; border-radius:10px; display:block; margin-top:4px; cursor:pointer;}
+
+  #imageLightbox{
+    position:fixed; inset:0; z-index:80; background:rgba(5,5,7,0.97);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #imageLightbox img{max-width:92vw; max-height:82vh; border-radius:6px; object-fit:contain;}
+  #imageLightbox button{
+    position:absolute; background:rgba(255,255,255,0.1); border:none; color:#fff;
+    border-radius:50%; width:44px; height:44px; font-size:22px; cursor:pointer;
+  }
+  #lightboxClose{top:calc(16px + env(safe-area-inset-top)); right:16px;}
+  #lightboxPrev{left:12px; top:50%; transform:translateY(-50%);}
+  #lightboxNext{right:12px; top:50%; transform:translateY(-50%);}
+  #lightboxCounter{
+    position:absolute; bottom:calc(20px + env(safe-area-inset-bottom));
+    left:50%; transform:translateX(-50%); color:var(--text-dim); font-size:13px;
+  }
   .msg audio.chat-audio{width:220px; margin-top:4px;}
   .msg a.chat-file{
     display:flex; align-items:center; gap:8px; margin-top:4px; padding:8px 10px;
@@ -298,6 +315,15 @@ if ('caches' in window) {
     <button id="cancelRecBtn">Cancelar</button>
     <button id="stopRecBtn">Enviar</button>
   </div>
+</div>
+
+<!-- VISOR DE FOTOS (pantalla completa, tipo galería) -->
+<div id="imageLightbox" class="hidden">
+  <button id="lightboxClose" title="Cerrar">✕</button>
+  <button id="lightboxPrev" title="Anterior">‹</button>
+  <img id="lightboxImg" alt="foto">
+  <button id="lightboxNext" title="Siguiente">›</button>
+  <div id="lightboxCounter"></div>
 </div>
 
 <!-- BANNER DE LLAMADA ENTRANTE -->
@@ -992,6 +1018,7 @@ function listenMessages() {
     const currentIds = new Set(Object.keys(data));
     const isFirstLoad = knownMessageIds === null;
     let newFromOthers = [];
+    chatImageGallery = []; // se reconstruye en cada render, en el mismo orden que se muestran
 
     Object.entries(data).forEach(([id, msg]) => {
       const dayKey = msg.ts ? dayKeyOf(msg.ts) : null;
@@ -1008,7 +1035,9 @@ function listenMessages() {
       const seenNames = seenBy.map(uid => (membersCache[uid] || {}).name).filter(Boolean);
       let bodyHtml;
       if (msg.type === 'image') {
-        bodyHtml = `<img class="chat-image" src="${msg.dataUrl}" alt="foto" onclick="window.open(this.src)">`;
+        const galleryIdx = chatImageGallery.length;
+        chatImageGallery.push(msg.dataUrl);
+        bodyHtml = `<img class="chat-image" src="${msg.dataUrl}" alt="foto" onclick="openLightbox(${galleryIdx})">`;
       } else if (msg.type === 'audio') {
         bodyHtml = `<audio class="chat-audio" controls src="${msg.dataUrl}"></audio>`;
       } else if (msg.type === 'file') {
@@ -1105,6 +1134,39 @@ function sendMessage() {
   notifyOthersOfNewMessage(text);
   input.value = '';
 }
+
+// ---------- VISOR DE FOTOS (galería a pantalla completa) ----------
+let chatImageGallery = [];
+let lightboxIndex = 0;
+
+function openLightbox(idx) {
+  lightboxIndex = idx;
+  renderLightbox();
+  document.getElementById('imageLightbox').classList.remove('hidden');
+}
+function renderLightbox() {
+  document.getElementById('lightboxImg').src = chatImageGallery[lightboxIndex];
+  document.getElementById('lightboxCounter').textContent = (lightboxIndex + 1) + ' / ' + chatImageGallery.length;
+  document.getElementById('lightboxPrev').style.visibility = lightboxIndex > 0 ? 'visible' : 'hidden';
+  document.getElementById('lightboxNext').style.visibility = lightboxIndex < chatImageGallery.length - 1 ? 'visible' : 'hidden';
+}
+document.getElementById('lightboxClose').onclick = () => document.getElementById('imageLightbox').classList.add('hidden');
+document.getElementById('lightboxPrev').onclick = () => { if (lightboxIndex > 0) { lightboxIndex--; renderLightbox(); } };
+document.getElementById('lightboxNext').onclick = () => { if (lightboxIndex < chatImageGallery.length - 1) { lightboxIndex++; renderLightbox(); } };
+// tocar el fondo oscuro (no la foto ni los botones) también cierra
+document.getElementById('imageLightbox').addEventListener('click', (e) => {
+  if (e.target.id === 'imageLightbox') document.getElementById('imageLightbox').classList.add('hidden');
+});
+// deslizar para pasar de foto en foto
+let lbTouchStartX = null;
+document.getElementById('imageLightbox').addEventListener('touchstart', (e) => { lbTouchStartX = e.touches[0].clientX; });
+document.getElementById('imageLightbox').addEventListener('touchend', (e) => {
+  if (lbTouchStartX === null) return;
+  const diff = e.changedTouches[0].clientX - lbTouchStartX;
+  if (diff > 50 && lightboxIndex > 0) { lightboxIndex--; renderLightbox(); }
+  else if (diff < -50 && lightboxIndex < chatImageGallery.length - 1) { lightboxIndex++; renderLightbox(); }
+  lbTouchStartX = null;
+});
 
 // ---------- ARCHIVOS / FOTOS / AUDIOS ----------
 // se guardan como base64 directo en Realtime Database (no usamos Firebase Storage,
