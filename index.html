@@ -304,7 +304,7 @@ if ('caches' in window) {
   </div>
   <div id="presenceBar"></div>
   <div id="inputBar">
-    <input type="file" id="fileInput" accept="image/*,.pdf,.doc,.docx,.txt" class="hidden">
+    <input type="file" id="fileInput" accept="image/*,.pdf,.doc,.docx,.txt" class="hidden" multiple>
     <button id="attachBtn" title="Adjuntar archivo/foto">📎</button>
     <button id="micBtn" title="Grabar audio">🎤</button>
     <input id="msgInput" type="text" placeholder="Escribí un mensaje..." autocomplete="off">
@@ -1213,31 +1213,40 @@ function compressImage(file, maxDim = 1280, quality = 0.72) {
 
 document.getElementById('attachBtn').onclick = () => document.getElementById('fileInput').click();
 
-document.getElementById('fileInput').onchange = async (e) => {
-  const file = e.target.files[0];
-  e.target.value = ''; // permite volver a elegir el mismo archivo después
-  if (!file) return;
+const MAX_FILES_AT_ONCE = 5;
 
-  try {
-    if (file.type.startsWith('image/')) {
-      const dataUrl = await compressImage(file);
-      if (dataUrl.length > MAX_FILE_BYTES) {
-        alert('La imagen sigue siendo muy pesada incluso comprimida. Probá con otra.');
-        return;
+document.getElementById('fileInput').onchange = async (e) => {
+  let files = Array.from(e.target.files);
+  e.target.value = ''; // permite volver a elegir los mismos archivos después
+  if (!files.length) return;
+
+  if (files.length > MAX_FILES_AT_ONCE) {
+    alert('Como mucho podés mandar ' + MAX_FILES_AT_ONCE + ' archivos juntos — se van a enviar solo los primeros ' + MAX_FILES_AT_ONCE + '.');
+    files = files.slice(0, MAX_FILES_AT_ONCE);
+  }
+
+  for (const file of files) {
+    try {
+      if (file.type.startsWith('image/')) {
+        const dataUrl = await compressImage(file);
+        if (dataUrl.length > MAX_FILE_BYTES) {
+          alert('"' + file.name + '" sigue siendo muy pesada incluso comprimida — no se mandó.');
+          continue;
+        }
+        pushChatMessage({ type: 'image', dataUrl, fileName: file.name });
+        notifyOthersOfNewMessage('📷 ' + currentUser.name + ' mandó una foto');
+      } else {
+        if (file.size > MAX_FILE_BYTES) {
+          alert('"' + file.name + '" pesa más de ' + Math.round(MAX_FILE_BYTES / 1024 / 1024 * 10) / 10 + 'MB — no se mandó.');
+          continue;
+        }
+        const dataUrl = await fileToBase64(file);
+        pushChatMessage({ type: 'file', dataUrl, fileName: file.name, fileSize: file.size });
+        notifyOthersOfNewMessage('📎 ' + currentUser.name + ' mandó un archivo: ' + file.name);
       }
-      pushChatMessage({ type: 'image', dataUrl, fileName: file.name });
-      notifyOthersOfNewMessage('📷 ' + currentUser.name + ' mandó una foto');
-    } else {
-      if (file.size > MAX_FILE_BYTES) {
-        alert('El archivo pesa más de ' + Math.round(MAX_FILE_BYTES / 1024 / 1024 * 10) / 10 + 'MB — es muy grande para mandarlo por acá.');
-        return;
-      }
-      const dataUrl = await fileToBase64(file);
-      pushChatMessage({ type: 'file', dataUrl, fileName: file.name, fileSize: file.size });
-      notifyOthersOfNewMessage('📎 ' + currentUser.name + ' mandó un archivo: ' + file.name);
+    } catch (err) {
+      alert('No se pudo adjuntar "' + file.name + '": ' + err.message);
     }
-  } catch (err) {
-    alert('No se pudo adjuntar el archivo: ' + err.message);
   }
 };
 
